@@ -1,0 +1,23 @@
+[package]
+name = "wasm-mutate"
+version = "2.2.1"
+edition = "2021"
+repository = "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-mutate"
+description = "A WebAssembly test case mutator"
+
+[dependencies]
+clap = { version = "4.5.38", optional = true }
+egg = "0.6.0"
+log = "0.4.27"
+rand = { version = "0.8.4", features = ["small_rng"] }
+thiserror = "1.0.28"
+walrus = "0.23.3"
+wasm-encoder = { version = "0.231.0", features = ['std', 'wasmparser'] }
+wasmparser = { version = "0.231.0", features = ['std', 'simd'] }
+
+[dev-dependencies]
+anyhow = "1.0"
+env_logger = "0.11.8"
+wasmparser = { version = "0.231.0", features = ['std', 'validate', 'features', 'simd'] }
+wasmprinter = "0.231.0"
+wat = "1.0.71"

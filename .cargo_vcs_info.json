@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "2dbe8b9b88f646195bf9229aa7083cd5f2b62679"
+  },
+  "path_in_vcs": "crates/wasm-mutate"
+}

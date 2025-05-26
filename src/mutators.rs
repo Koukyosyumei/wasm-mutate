@@ -138,7 +138,7 @@ impl WasmMutate<'_> {
 
         assert!(can_mutate);
 
-        let attempts = 3;
+        let attempts = 2000;
         let mut last_mutation = None;
 
         for _ in 0..attempts {

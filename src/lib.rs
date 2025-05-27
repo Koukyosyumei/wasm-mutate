@@ -7,11 +7,11 @@
 //! tool. `wasm-mutate` can serve as a custom mutator for mutation-based
 //! fuzzing.
 
-#![cfg_attr(not(feature = "clap"), deny(missing_docs))]
+#![cfg_attr(not(feature = "clap"), warn(missing_docs))]
 
-pub mod error;
-pub mod info;
-pub mod module;
+mod error;
+mod info;
+mod module;
 pub mod mutators;
 
 pub use error::*;

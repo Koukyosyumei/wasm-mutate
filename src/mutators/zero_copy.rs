@@ -15,55 +15,6 @@ use wasmparser::{KnownCustom, Parser, Payload};
 #[derive(Clone, Copy)]
 pub struct ZeroCopyFunctionMutator;
 
-fn find_target_function_index(
-    wasm_bytes: &[u8],
-    target_function_name: String,
-) -> Result<Option<u32>> {
-    let parser = Parser::new(0);
-    let mut function_index = 0u32;
-    let mut export_section_found = false;
-
-    for payload in parser.parse_all(wasm_bytes) {
-        match payload? {
-            Payload::ExportSection(reader) => {
-                export_section_found = true;
-                for export in reader {
-                    let export = export?;
-                    println!("1. {}", export.name);
-                    if export.name == target_function_name {
-                        if let wasmparser::ExternalKind::Func = export.kind {
-                            return Ok(Some(export.index));
-                        }
-                    }
-                }
-            }
-            Payload::FunctionSection(reader) => {
-                if !export_section_found {
-                    function_index += reader.count();
-                }
-            }
-            Payload::CustomSection(reader) => {
-                if let KnownCustom::Name(namesection_reader) = reader.as_known() {
-                    for names in namesection_reader {
-                        if let Ok(names) = names {
-                            if let wasmparser::Name::Function(namemap) = names {
-                                for fname in namemap {
-                                    if let Ok(naming) = fname {
-                                        println!("{}: {}", naming.index, naming.name);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(None)
-}
-
 fn find_target_function_index_from_custom_section(
     wasm_bytes: &[u8],
     target_function_name: String,
@@ -110,9 +61,25 @@ fn find_ty_idx(wasm_bytes: &[u8], target_func_index: u32) -> Option<u32> {
                 info.function_map.push(ty.unwrap());
             }
 
-            println!("--- {:?}", info.function_map);
-
             return Some(info.function_map[target_func_index as usize]);
+        }
+    }
+    None
+}
+
+fn find_function_body_range(
+    wasm_bytes: &[u8],
+    target_func_index: u32,
+) -> Option<std::ops::Range<usize>> {
+    let parser = Parser::new(0);
+    let mut current_func_index = 0u32;
+
+    for payload in parser.parse_all(wasm_bytes) {
+        if let Ok(Payload::CodeSectionEntry(reader)) = payload {
+            if current_func_index == target_func_index {
+                return Some(reader.range().start..reader.range().end);
+            }
+            current_func_index += 1;
         }
     }
     None
@@ -163,9 +130,6 @@ impl Mutator for ZeroCopyFunctionMutator {
         let func_ty = match &config.info().types_map[usize::try_from(ty_idx).unwrap()] {
             TypeInfo::Func(func_ty) => func_ty,
         };
-
-        println!("{:?}", func_ty.params);
-        println!("{:?}", func_ty.returns);
 
         let mut func = wasm_encoder::Function::new(vec![]);
         // Instructions for the new function:
@@ -282,7 +246,6 @@ impl Mutator for ZeroCopyFunctionMutator {
     }
 }
 
-/// u32 を LEB128 エンコードするヘルパー
 fn leb128_encode(mut value: u32) -> Vec<u8> {
     let mut buf = Vec::new();
     loop {
@@ -298,31 +261,24 @@ fn leb128_encode(mut value: u32) -> Vec<u8> {
     buf
 }
 
-/// RAW バイト列中のすべての `call(old_id)` を探し、その中から
-/// ランダムに１箇所だけを `call(new_id)` に置き換える。
-///
-/// - bytes: 元の WASM バイト列
-/// - old_id: 置き換えたい関数番号
-/// - new_id: 新しい関数番号
-/// - seed: RNG のシード値
 pub fn patch_calls_raw_random(
     bytes: &[u8],
     old_id: u32,
     new_id: u32,
+    start_pos: usize,
+    end_pos: usize,
     seed: u64,
 ) -> Result<Vec<u8>> {
     let mut out = bytes.to_vec();
     let old_leb = leb128_encode(old_id);
     let new_leb = leb128_encode(new_id);
 
-    // すべての候補オフセットを収集
     let opcode_call = 0x10u8;
     let mut candidates = Vec::new();
-    let len = out.len();
     let pattern_len = 1 + old_leb.len();
 
-    let mut i = 0;
-    while i + pattern_len <= len {
+    let mut i = start_pos;
+    while i + pattern_len <= end_pos {
         if out[i] == opcode_call && out[i + 1..i + 1 + old_leb.len()] == old_leb[..] {
             candidates.push(i);
             i += pattern_len;
@@ -331,17 +287,14 @@ pub fn patch_calls_raw_random(
         }
     }
 
-    // 候補がない場合はそのまま返却
     if candidates.is_empty() {
         return Ok(out);
     }
 
-    // シード指定で RNG を初期化し、ランダムに１つ選択
     let mut rng = StdRng::seed_from_u64(seed);
     let idx = rng.gen_range(0..candidates.len());
     let pos = candidates[idx];
 
-    // その１箇所だけを置き換え
     out[pos + 1..pos + 1 + old_leb.len()].copy_from_slice(&new_leb);
 
     Ok(out)
@@ -355,9 +308,13 @@ mod tests {
 
     #[test]
     fn test_patch_calls_raw_random() {
-        // simple モジュール: func0=$mul, func1=$add, func2=$use_mul が２回呼び出す
         let wat = r#"
             (module
+                (func $add (export "add") (param i32 i32) (result i32)
+                    local.get 0 
+                    local.get 1 
+                    i32.add
+                )
                 (func $mul (export "mul") (param i32 i32) (result i32)
                     local.get 0 
                     local.get 1 
@@ -373,18 +330,46 @@ mod tests {
                 )
             )
         "#;
+        let expected_wat = r#"
+            (module
+                (func $add (export "add") (param i32 i32) (result i32)
+                    local.get 0 
+                    local.get 1 
+                    i32.add
+                )
+                (func $mul (export "mul") (param i32 i32) (result i32)
+                    local.get 0 
+                    local.get 1 
+                    i32.mul
+                )
+                (func $use (export "use") (param i32 i32) (result i32)
+                    local.get 0 
+                    local.get 1 
+                    call $mul
+                    local.get 0 
+                    local.get 1 
+                    call $add
+                )
+            )
+        "#;
+
         let wasm = wat::parse_str(wat).unwrap();
-        let patched = patch_calls_raw_random(&wasm, 0, 1, 42).unwrap();
-        let text = wasmprinter::print_bytes(patched).unwrap();
-        println!("{}", text);
-        assert!(false);
+        let expected_wasm = wat::parse_str(expected_wat).unwrap();
+
+        let func_idx =
+            find_target_function_index_from_custom_section(&wasm, "use".to_string()).unwrap();
+        let func_range = find_function_body_range(&wasm, func_idx.unwrap()).unwrap();
+        let patched =
+            patch_calls_raw_random(&wasm, 1, 0, func_range.start, func_range.end, 42).unwrap();
+
+        let expected_text = wasmprinter::print_bytes(expected_wasm).unwrap();
+        let patched_text = wasmprinter::print_bytes(patched).unwrap();
+
+        assert_eq!(expected_text.trim(), patched_text.trim());
     }
 
     #[test]
     fn test_add_specific_function() {
-        // Initial WAT: a module with a memory and a type (i32, i32) -> ()
-        // We'll ensure type 0 has the signature (param i32 i32) (result)
-        // and a memory exists.
         println!("222222");
         let original_wat = r#"
             (module
@@ -484,27 +469,6 @@ mod tests {
             )
         "#;
 
-        //let original_wat_bytes = wat::parse_str(original_wat).unwrap();
-
-        /*
-        //let target_func_idx =
-        //    find_target_function_index(&original_wat_bytes, "Fr_copy".to_string()).unwrap();
-        let target_func_idx = find_target_function_index_from_custom_section(
-            &original_wat_bytes,
-            "Fr_copy".to_string(),
-        )
-        .unwrap();
-        let ty_idx = find_ty_idx(&original_wat_bytes, target_func_idx.unwrap());
-
-        println!("5555");
-        */
-
-        println!("333333");
         match_mutation(original_wat, ZeroCopyFunctionMutator, expected_wat_regex);
-        println!("444444");
-
-        //assert!(false);
-        println!("444444");
-        assert!(false);
     }
 }

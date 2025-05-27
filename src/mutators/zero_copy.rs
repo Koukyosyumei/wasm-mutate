@@ -76,6 +76,7 @@ pub fn find_function_body_range(
 
     for payload in parser.parse_all(wasm_bytes) {
         if let Ok(Payload::CodeSectionEntry(reader)) = payload {
+            println!("c: {}", current_func_index);
             if current_func_index == target_func_index {
                 return Some(reader.range().start..reader.range().end);
             }

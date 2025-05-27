@@ -404,7 +404,6 @@ mod tests {
 
     #[test]
     fn test_add_specific_function() {
-        println!("222222");
         let original_wat = r#"
             (module
                 (func $mul (export "mul") (param i32 i32) (result i32)

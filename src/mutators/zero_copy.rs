@@ -15,7 +15,7 @@ use wasmparser::{KnownCustom, Parser, Payload};
 #[derive(Clone, Copy)]
 pub struct ZeroCopyFunctionMutator;
 
-fn find_target_function_index_from_custom_section(
+pub fn find_target_function_index_from_custom_section(
     wasm_bytes: &[u8],
     target_function_name: String,
 ) -> Result<Option<u32>> {
@@ -47,7 +47,7 @@ fn find_target_function_index_from_custom_section(
     Ok(None)
 }
 
-fn find_ty_idx(wasm_bytes: &[u8], target_func_index: u32) -> Option<u32> {
+pub fn find_ty_idx(wasm_bytes: &[u8], target_func_index: u32) -> Option<u32> {
     let mut info = ModuleInfo::default();
     info.input_wasm = wasm_bytes.clone();
     let parser = Parser::new(0);
@@ -67,7 +67,7 @@ fn find_ty_idx(wasm_bytes: &[u8], target_func_index: u32) -> Option<u32> {
     None
 }
 
-fn find_function_body_range(
+pub fn find_function_body_range(
     wasm_bytes: &[u8],
     target_func_index: u32,
 ) -> Option<std::ops::Range<usize>> {

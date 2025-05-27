@@ -10,9 +10,9 @@
 #![cfg_attr(not(feature = "clap"), deny(missing_docs))]
 
 mod error;
-mod info;
+pub mod info;
 mod module;
-mod mutators;
+pub mod mutators;
 
 pub use error::*;
 

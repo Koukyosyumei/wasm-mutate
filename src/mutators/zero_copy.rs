@@ -116,6 +116,37 @@ impl Mutator for ZeroCopyFunctionMutator {
         }
         func_sec_enc.function(ty_idx);
 
+        // (Re)encode the name section
+        let mut name_sec_enc = wasm_encoder::NameSection::new();
+        let mut function_names = wasm_encoder::NameMap::new();
+
+        let original_wat_bytes = config.info.clone().unwrap().input_wasm;
+        let parser = Parser::new(0);
+        let mut max_idx = 0;
+        for payload in parser.parse_all(original_wat_bytes) {
+            match payload? {
+                Payload::CustomSection(reader) => {
+                    if let KnownCustom::Name(namesection_reader) = reader.as_known() {
+                        for names in namesection_reader {
+                            if let Ok(names) = names {
+                                if let wasmparser::Name::Function(namemap) = names {
+                                    for fname in namemap {
+                                        if let Ok(naming) = fname {
+                                            max_idx = std::cmp::max(max_idx, naming.index);
+                                            function_names.append(naming.index, naming.name);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        function_names.append(max_idx + 1, "Fr_copy_zero");
+        name_sec_enc.functions(&function_names);
+
         // Copy the existing code bodies over and then add a new dummy body for
         // this function.
         let mut code_sec_enc = wasm_encoder::CodeSection::new();
@@ -200,7 +231,10 @@ impl Mutator for ZeroCopyFunctionMutator {
                         module.section(&code_sec_enc);
                         true
                     }
-
+                    x if x == wasm_encoder::SectionId::Custom as u8 => {
+                        module.section(&name_sec_enc);
+                        true
+                    }
                     _ => false,
                 })
         } else {
@@ -427,29 +461,29 @@ mod tests {
                     local.get 1
                     i32.add
                 )
-                (func $Fr_copy (;2;) (type 1) (param $pr i32) (param $px i32)
-                    local.get $pr
-                    local.get $px
+                (func $Fr_copy (;2;) (type 1) (param i32 i32)
+                    local.get 0
+                    local.get 1
                     i64.load
                     i64.store
-                    local.get $pr
-                    local.get $px
+                    local.get 0
+                    local.get 1
                     i64.load offset=8
                     i64.store offset=8
-                    local.get $pr
-                    local.get $px
+                    local.get 0
+                    local.get 1
                     i64.load offset=16
                     i64.store offset=16
-                    local.get $pr
-                    local.get $px
+                    local.get 0
+                    local.get 1
                     i64.load offset=24
                     i64.store offset=24
-                    local.get $pr
-                    local.get $px
+                    local.get 0
+                    local.get 1
                     i64.load offset=32
                     i64.store offset=32
                 )
-                (func (;3;) (type 1) (param i32 i32)
+                (func $Fr_copy_zero (;3;) (type 1) (param i32 i32)
                     local.get 0
                     i64.const 0
                     i64.store

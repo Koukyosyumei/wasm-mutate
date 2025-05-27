@@ -263,7 +263,7 @@ impl<'wasm> WasmMutate<'wasm> {
         Err(Error::no_mutations_applicable())
     }
 
-    fn setup(&mut self, input_wasm: &'wasm [u8]) -> Result<()> {
+    pub fn setup(&mut self, input_wasm: &'wasm [u8]) -> Result<()> {
         self.info = Some(ModuleInfo::new(input_wasm)?);
         self.rng = Some(SmallRng::seed_from_u64(self.seed));
         Ok(())
